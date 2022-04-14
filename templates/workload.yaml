@@ -1,0 +1,258 @@
+{{- if eq .Values.type "stateless" }}
+apiVersion: apps/v1
+kind: Deployment
+{{- else if eq .Values.type "stateful" }}
+apiVersion: apps/v1
+kind: StatefulSet
+{{- end }}
+metadata:
+  name: {{ template "base.fullname" . }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+spec:
+  {{- if eq .Values.type "stateless" }}
+  strategy:
+    type: {{ default "RollingUpdate" .Values.strategyType }}
+  {{- else if eq .Values.type "stateful" }}
+  podManagementPolicy: {{ default "OrderedReady" .Values.podManagementPolicy }}
+  serviceName: {{ template "base.fullname" . }}-headless
+  {{- end }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "base.name" . }}
+      fullname: {{ template "base.fullname" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+{{ include "base.labels" . | indent 8 }}
+      {{- if or .Values.configMapsFromFilesChangeTriggersRestart .Values.configMapsEnvChangeTriggersRestart .Values.configMapsFromVarChangeTriggersRestart .Values.secretEnvChangeTriggersRestart .Values.additionalPodAnnotations }}
+      annotations:
+        {{- if .Values.configMapsFromFilesChangeTriggersRestart }}
+        checksum/configMapsFromFiles: {{ include (print $.Template.BasePath "/cm-files.yaml") . | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.configMapsEnvChangeTriggersRestart }}
+        checksum/configMapsEnv: {{ include (print $.Template.BasePath "/cm-env.yaml") . | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.configMapsFromVarChangeTriggersRestart }}
+        checksum/configMapsFromVar: {{ include (print $.Template.BasePath "/cm-var.yaml") . | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.secretEnvChangeTriggersRestart }}
+        checksum/secretEnv: {{ include (print $.Template.BasePath "/secret-env.yaml") . | sha256sum | quote }}
+        {{- end }}
+        {{- range $annKey, $annValue := .Values.additionalPodAnnotations }}
+        {{- /*  Issue: https://github.com/helm/helm/issues/1707#issuecomment-686813959 .
+                We do not want to force user quoting values in values.yaml.
+                `toString` and `printf "%s"` doing right type conversion
+                but in case of long numeric value it's already in scientific notation (e.g. 8.7131128e+07).
+                So need to check type.
+                In current version of helm any numeric value type will be float64 */ -}}
+        {{- if has (typeOf $annValue) (list "int" "float" "float64") }}
+        {{ $annKey }}: {{ printf "%.f" $annValue | quote }}
+        {{- else }}
+        {{ $annKey }}: {{ $annValue | quote }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ template "base.serviceAccountName" . }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+      {{- end }}
+      {{- if .Values.appPodHostname }}
+      hostname: {{ .Values.appPodHostname }}
+      {{- end }}
+      {{- if .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 8 }}
+      {{- end }}
+      {{- if or .Values.initContainers .Values.waitFor }}
+      initContainers:
+        {{- if .Values.initContainers }}
+{{ toYaml .Values.initContainers | indent 8 }}
+        {{- end }}
+        {{- $root := . -}}
+        {{- range $waitSvc := .Values.waitFor }}
+        - name: wait-for-{{ $waitSvc }}
+          image: {{ $root.Values.waitForInitImage }}
+          env:
+            - name: THIS_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          command:
+            - bash
+            - -c
+            - |
+                namespace="${THIS_POD_NAMESPACE}"
+                service="{{ $waitSvc }}"
+
+                cacert="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+                token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+
+                tries=100
+                until curl --cacert $cacert --header "Authorization: Bearer $token" \
+                https://kubernetes.default.svc/api/v1/namespaces/$namespace/endpoints/$service \
+                | jq -er '.subsets[].addresses' \
+                || [[ $tries -lt 0 ]]; do
+                  sleep 1
+                  ((tries--))
+                done
+                if [[ $tries -eq 0 ]]; then
+                  echo "Service '$service' isn't availiable after 100 tries"
+                  exit 1
+                else
+                  echo "Service '$service' is availiable after $((100-tries)) tries"
+                fi
+
+        {{- end }}
+      {{- end }}
+      containers:
+        {{- $root := . -}}
+        {{- range $containerName, $containerValues := .Values.containers }}
+        - name: {{ $containerName }}
+          {{- $imageTag := default $containerValues.appVersion $containerValues.imageTag -}}
+          {{- if $containerValues.image }}
+          image: {{ $containerValues.image }}:{{ $imageTag }}
+          {{- else }}
+          image: {{ $containerValues.imageRegistry }}/{{ template "base.fullnameForImage" $root }}:{{ $imageTag }}
+          {{- end }}
+          imagePullPolicy: {{ $containerValues.imagePullPolicy }}
+          {{- if $containerValues.extraEnv }}
+          env:
+{{ toYaml $containerValues.extraEnv | indent 10 }}
+          {{- end }}
+          {{- if or $containerValues.env $containerValues.secretEnv $containerValues.envFrom }}
+          envFrom:
+            {{- if $containerValues.env }}
+            - configMapRef:
+                name: {{ template "base.fullname" $root }}-{{ $containerName }}-cm-env
+            {{- end }}
+            {{- if $containerValues.secretEnv }}
+            - secretRef:
+                name: {{ template "base.fullname" $root }}-{{ $containerName }}-secret-env
+            {{- end }}
+            {{- if $containerValues.envFrom }}
+{{ toYaml $containerValues.envFrom | indent 12 }}
+            {{- end }}
+          {{- end }}
+          resources:
+{{ toYaml $containerValues.resources | indent 12 }}
+          ports:
+          {{- if kindIs "float64" $containerValues.containerPort }}
+            - containerPort: {{ $containerValues.containerPort }}
+              name: port-{{ $containerValues.containerPort }}
+          {{- else }}
+            {{- range $port := $containerValues.containerPort }}
+              - containerPort: {{ $port }}
+                name: port-{{ $port }}
+            {{- end }}
+          {{- end }}
+          {{- if $containerValues.commandOverride }}
+          command:
+{{ toYaml $containerValues.commandOverride | indent 12 }}
+          {{- end }}
+          {{- if $containerValues.argsOverride }}
+          args:
+{{ toYaml $containerValues.argsOverride | indent 12 }}
+          {{- end }}
+          {{- if $containerValues.startupProbe }}
+          startupProbe:
+{{ toYaml $containerValues.startupProbe | indent 12 }}
+          {{- end }}
+          {{- if $containerValues.livenessProbe }}
+          livenessProbe:
+{{ toYaml $containerValues.livenessProbe | indent 12 }}
+          {{- end }}
+          {{- if $containerValues.readinessProbe }}
+          readinessProbe:
+{{ toYaml $containerValues.readinessProbe | indent 12 }}
+          {{- end }}
+          {{- if or $containerValues.configMapsFromFiles $containerValues.emptyDirVolumes $containerValues.secrets $containerValues.configMapsFromVar $containerValues.configMapsExisting $containerValues.persistence }}
+          volumeMounts:
+            {{- range $cm := $containerValues.configMapsFromFiles }}
+            - name: {{ $containerName }}-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+              mountPath: {{ $cm.mountPath }}
+            {{- end }}
+            {{- range $cm := $containerValues.configMapsFromVar }}
+            - name: {{ $containerName }}-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+              mountPath: {{ $cm.mountPath }}
+            {{- end }}
+            {{- range $cm := $containerValues.configMapsExisting }}
+            - name: {{ $containerName }}-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+              mountPath: {{ $cm.mountPath }}
+            {{- end }}
+            {{- range $emptyDirName, $emptyDirValue := $containerValues.emptyDirVolumes }}
+            - mountPath: {{ $emptyDirValue.mountPath }}
+              name: {{ $emptyDirName }}
+            {{- end }}
+            {{- range $secret := $containerValues.secrets }}
+            - name: {{ $secret.name }}
+              mountPath: {{ $secret.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- range $pv := $containerValues.persistence }}
+            - name: {{ $pv.name }}
+              mountPath: {{ $pv.mountPath }}
+            {{- end }}
+          {{- end }}
+          {{- with $containerValues.securityContext }}
+          securityContext: {{ $containerValues.securityContext | toYaml | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext: {{ . | toYaml | nindent 8 }}
+      {{- end }}
+      volumes:
+        {{- $root := . -}}
+        {{- range $containerName, $containerValues := .Values.containers -}}
+        {{- range $cm := $containerValues.configMapsFromFiles }}
+        - name: {{ $containerName }}-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+          configMap:
+            name: {{ template "base.fullname" $root }}-{{ $containerName }}-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+            defaultMode: {{ $cm.defaultMode }}
+        {{- end }}
+        {{- range $cm := $containerValues.configMapsFromVar }}
+        - name: {{ $containerName }}-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+          configMap:
+            name: {{ template "base.fullname" $root }}-{{ $containerName }}-cm-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+            defaultMode: {{ $cm.defaultMode }}
+        {{- end }}
+        {{- range $cm := $containerValues.configMapsExisting }}
+        - name: {{ $containerName }}-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+          configMap:
+            name: {{ $cm.name }}
+            defaultMode: {{ $cm.defaultMode }}
+        {{- end }}
+        {{- range $emptyDirName, $emptyDirValue := $containerValues.emptyDirVolumes }}
+        - name: {{ $emptyDirName }}
+          {{- if ($emptyDirValue.memory | default false) }}
+          emptyDir:
+            medium: "Memory"
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        {{- range $containerValues.secrets }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .name }}
+            optional: {{ .optional | default false }}
+        {{- end }}
+        {{- end }}
+  {{- if and .Values.type "stateful" .Values.persistentVolumeClaim.enabled }}
+  volumeClaimTemplates:
+  - metadata:
+      name: {{ .Values.persistentVolumeClaim.name }}
+      labels:
+{{ include "base.labels" . | indent 8 }}
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: {{ .Values.persistentVolumeClaim.size }}
+      storageClassName: {{ .Values.persistentVolumeClaim.storageClassName }}
+  {{- end }}

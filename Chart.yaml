@@ -1,0 +1,8 @@
+apiVersion: v2
+name: base
+version: 1.5.2
+appVersion: "1.0"
+kubeVersion: ">= 1.18.0-0"
+description: base chart
+maintainers:
+  - name: Alter-vision Team

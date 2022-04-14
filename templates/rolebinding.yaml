@@ -1,0 +1,37 @@
+{{- if or .Values.rbac.role.create .Values.waitFor -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "base.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "base.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "base.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{ if or .Values.rbac.clusterRole.create -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: {{ .Values.rbac.clusterRole.bindWithClusterRoleBinding | ternary "Cluster" "" }}RoleBinding
+metadata:
+  name: {{ printf "%s%s%s" (.Values.rbac.clusterRole.bindWithClusterRoleBinding | ternary (printf "%s-" .Release.Namespace) "") (include "base.fullname" .) "-cr" }}
+  {{- if not .Values.rbac.clusterRole.bindWithClusterRoleBinding }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ include "base.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "base.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end -}}

@@ -1,0 +1,79 @@
+additionalPodAnnotations:
+  ci/commithash: 87131128
+
+podSecurityContext:
+  fsGroup: 1001
+  fsGroupChangePolicy: OnRootMismatch
+  runAsGroup: 1001
+  runAsUser: 1001
+  runAsNonRoot: true
+
+containers:
+  app:
+    appVersion: 1.0.0.rc1-stub
+    image: "registry.example.com/productname/stubapp"
+
+    configMapsExisting:
+      - name: test1-cm
+        defaultMode: 0644
+        mountPath: /data1
+      - name: test2-cm
+        defaultMode: 0644
+        mountPath: /data2
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - "ALL"
+      privileged: false
+      procMount: "Default"
+      readOnlyRootFilesystem: false
+      runAsGroup: 1001
+      runAsUser: 1001
+      runAsNonRoot: true
+
+ingress:
+  enabled: true
+  ingresses:
+    test:
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /$2
+        kubernetes.io/ingress.class: some-external-ctrl-class
+      ingressClassName: nginx
+      rules:
+        - host: external-name.example.com
+          paths:
+            - path: /something(/|$)(.*)
+              pathType: Prefix
+              servicePort: 80
+
+      tls:
+        enabled: true
+        ## Omit if `enabled: false`
+        secrets:
+          - secretName: wildcard-example-com-tls
+            hosts:
+              - external-name.example.com
+
+serviceAccount:
+  create: true
+
+rbac:
+  role:
+    create: true
+    rules:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["get", "watch", "list"]
+  clusterRole:
+    create: true
+    rules:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["get", "watch", "list"]
+    bindWithClusterRoleBinding: true
+
+pdb:
+  enabled: true
+  minAvailable: 3
+  maxUnavailable: 50%

@@ -1,0 +1,19 @@
+{{- range $containerName, $containerValues := .Values.containers }}
+{{- range $cm := $containerValues.configMapsFromVar }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "base.fullname" $ }}-{{ $containerName }}-cm-{{ regexReplaceAll "[^a-zA-Z0-9]" (regexReplaceAll "^/" $cm.mountPath "") "-" }}
+  labels:
+{{ include "base.labels" $ | indent 4 }}
+binaryData:
+  {{- range $file := $cm.files }}
+  {{- if $file.encoded }}
+  {{ $file.name }}: {{ $file.data }}
+  {{- else }}
+  {{ $file.name }}: {{ $file.data | b64enc }}
+  {{- end }}
+  {{ end }}
+{{- end }}
+{{- end }}

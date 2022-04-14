@@ -1,0 +1,20 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ template "base.fullname" . }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ template "base.name" . }}
+      fullname: {{ template "base.fullname" . }}
+      release: {{ .Release.Name }}
+{{- with .Values.pdb.minAvailable }}
+  minAvailable: {{ . }}
+{{- end }}
+{{- with .Values.pdb.maxUnavailable }}
+  maxUnavailable: {{ . }}
+{{- end }}
+{{- end }}

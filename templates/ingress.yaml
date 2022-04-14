@@ -1,0 +1,52 @@
+{{- if .Values.ingress.enabled -}}
+{{- $ingressApiVersion := include "base.ingressApiVersion" . -}}
+{{- range $nameSuffix, $ingress := .Values.ingress.ingresses -}}
+{{- $serviceName := include "base.fullname" $ -}}
+---
+apiVersion: {{ $ingressApiVersion }}
+kind: Ingress
+metadata:
+  name: {{ include "base.fullname" $ }}-{{ $nameSuffix }}
+  labels:
+{{ include "base.labels" $ | indent 4 }}
+  annotations:
+    {{- range $key, $value := $ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if $ingress.ingressClassName }}
+  ingressClassName: {{ $ingress.ingressClassName }}
+  {{- end }}
+  rules:
+    {{- range $ingress.rules }}
+    {{- $rule := . }}
+    - host: {{ $rule.host }}
+      http:
+        paths:
+          {{- range $path := $rule.paths }}
+          - path: {{ $path.path }}
+            pathType: {{ $path.pathType | default "Prefix" }}
+            backend:
+              {{- if eq $ingressApiVersion "networking.k8s.io/v1" }}
+                {{- if $path.servicePort }}
+                  {{- dict "service" (dict "name" ($serviceName) "port" (dict "number" ($path.servicePort)))  | toYaml | nindent 14 -}}
+                {{- else -}}
+                  {{- toYaml $path.backend | nindent 14 -}}
+                {{- end }}
+              {{- else }}
+              serviceName: {{ $serviceName }}
+              servicePort: {{ $path.servicePort }}
+              {{- end }}
+          {{- end }}
+    {{- end }}
+  {{- if $ingress.tls.enabled }}
+  tls:
+    {{- range $ingress.tls.secrets }}
+    {{- $tls := . }}
+    - hosts:
+        {{- toYaml $tls.hosts | nindent 8 }}
+      secretName: {{ $tls.secretName | quote }}
+    {{- end }}
+  {{ end }}
+{{ end }}
+{{ end }}

@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "base.fullname" . }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+{{- if .Values.serviceAnnotations }}
+  annotations:
+    {{- with .Values.serviceAnnotations }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}
+spec:
+  ports:
+  {{- if .Values.servicePorts }}
+    {{- range $port_name, $port_values := .Values.servicePorts }}
+    - name: {{ $port_name }}
+      port: {{ $port_values.servicePort }}
+      protocol: TCP
+      targetPort: {{ $port_values.targetPort }}
+    {{- end }}
+  {{- else }}
+    - name: http
+      port: {{ .Values.servicePort }}
+      protocol: TCP
+      targetPort: {{ .Values.targetPort }}
+  {{- end }}
+  selector:
+    app: {{ template "base.name" . }}
+    fullname: {{ template "base.fullname" . }}
+    release: {{ .Release.Name }}
+  type: {{ .Values.serviceType }}
+{{- $root := . -}}
+{{- range .Values.additionalServiceNames -}}
+{{- $svc := . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels:
+{{ include "base.labels" $root | indent 4 }}
+spec:
+  ports:
+  {{- if .Values.servicePorts }}
+    {{- range $port_name, $port_values := .Values.servicePorts }}
+      - name: {{ $port_name }}
+        port: {{ $port_values.servicePort }}
+        protocol: TCP
+        targetPort: {{ $port_values.targetPort }}
+    {{- end }}
+  {{- else }}
+      - name: http
+        port: {{ $root.Values.servicePort }}
+        protocol: TCP
+        targetPort: {{ $root.Values.targetPort }}
+  {{- end }}
+  selector:
+    app: {{ template "base.name" $root }}
+    fullname: {{ template "base.fullname" $root }}
+    release: {{ $root.Release.Name }}
+  type: {{ $root.Values.serviceType }}
+{{- end }}
+{{- if eq .Values.type "stateful" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "base.fullname" . }}-headless
+  labels:
+{{ include "base.labels" . | indent 4 }}
+{{- if .Values.serviceAnnotations }}
+  annotations:
+    {{- with .Values.serviceAnnotations }}
+{{ toYaml . | indent 4 }}
+    {{- end }}
+{{- end }}
+spec:
+  ports:
+  {{- if .Values.servicePorts }}
+    {{- range $port_name, $port_values := .Values.servicePorts }}
+    - name: {{ $port_name }}
+      port: {{ $port_values.servicePort }}
+      protocol: TCP
+      targetPort: {{ $port_values.targetPort }}
+    {{- end }}
+  {{- else }}
+    - name: http
+      port: {{ .Values.servicePort }}
+      protocol: TCP
+      targetPort: {{ .Values.targetPort }}
+  {{- end }}
+  selector:
+    app: {{ template "base.name" . }}
+    fullname: {{ template "base.fullname" . }}
+    release: {{ .Release.Name }}
+  type: ClusterIP
+  clusterIP: None
+{{- end }}

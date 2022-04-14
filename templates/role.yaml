@@ -1,0 +1,31 @@
+{{- if or .Values.rbac.role.create .Values.waitFor -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "base.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+rules:
+{{- if .Values.waitFor }}
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get"]
+{{- end -}}
+{{- if .Values.rbac.role.rules }}
+{{- toYaml .Values.rbac.role.rules | nindent 2 }}
+{{- end -}}
+{{- end }}
+{{ if .Values.rbac.clusterRole.create -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "base.fullname" . }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+rules:
+{{- if .Values.rbac.clusterRole.rules }}
+{{- toYaml .Values.rbac.clusterRole.rules | nindent 2 }}
+{{- end -}}
+{{- end }}

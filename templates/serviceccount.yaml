@@ -1,0 +1,9 @@
+{{- if or .Values.serviceAccount.create .Values.waitFor -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ template "base.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "base.labels" . | indent 4 }}
+{{- end -}}

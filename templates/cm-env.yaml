@@ -1,0 +1,16 @@
+{{- $root := . -}}
+{{- range $containerName, $containerValues := .Values.containers }}
+{{- if $containerValues.env }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "base.fullname" $root }}-{{ $containerName }}-cm-env
+  labels:
+{{ include "base.labels" $root | indent 4 }}
+data:
+  {{- range $key, $value := $containerValues.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}
